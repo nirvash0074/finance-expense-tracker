@@ -16,6 +16,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showBudget, setShowBudget] = useState(false);
+  const [showMonths, setShowMonths] = useState(false);
 
   // form
   const [amount, setAmount] = useState("");
@@ -25,6 +26,9 @@ export default function Home() {
 
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [categoriesMap, setCategoriesMap] = useState<Record<string, { name: string; color: string }>>({});
+
+  // edit state
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
   useEffect(() => {
     fetch("/api/months")
@@ -70,9 +74,7 @@ export default function Home() {
     });
     const d = await res.json();
     if (d.ok) {
-      // refresh
-      const exp = await fetch(`/api/months/${selectedMonth}/expenses`).then((r) => r.json());
-      setExpenses(exp.expenses || []);
+      await refreshExpenses();
       setShowAdd(false);
       setAmount("");
       setDate("");
@@ -80,6 +82,40 @@ export default function Home() {
       setCategoryId("");
     } else {
       alert(d.error || "Failed to add expense");
+    }
+  }
+
+  async function refreshExpenses() {
+    if (!selectedMonth) return;
+    setLoading(true);
+    const [expRes, budRes] = await Promise.all([
+      fetch(`/api/months/${selectedMonth}/expenses`).then((r) => r.json()),
+      fetch(`/api/months/${selectedMonth}/budgets`).then((r) => r.json()),
+    ]);
+    setExpenses(expRes.expenses || []);
+    setBudgets(budRes.budgets || []);
+    setLoading(false);
+  }
+
+  async function saveEditedExpense(updated: Expense) {
+    const res = await fetch(`/api/expenses/${updated.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updated) });
+    const d = await res.json();
+    if (d.ok) {
+      await refreshExpenses();
+      setEditingExpense(null);
+    } else {
+      alert(d.error || 'Update failed');
+    }
+  }
+
+  async function deleteExpense(id: string) {
+    if (!confirm('Delete this expense?')) return;
+    const res = await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
+    const d = await res.json();
+    if (d.ok) {
+      await refreshExpenses();
+    } else {
+      alert(d.error || 'Delete failed');
     }
   }
 
@@ -100,9 +136,33 @@ export default function Home() {
       }
     }
     // refresh
-    const bRes = await fetch(`/api/months/${selectedMonth}/budgets`).then((r) => r.json());
-    setBudgets(bRes.budgets || []);
+    await refreshExpenses();
     setShowBudget(false);
+  }
+
+  // Month management
+  async function createMonth(year: number, month: number, name?: string) {
+    const res = await fetch('/api/months', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ year, month, name }) });
+    const d = await res.json();
+    if (d.ok) {
+      // refresh months
+      const mres = await fetch('/api/months').then(r=>r.json());
+      setMonths(mres.months || []);
+    }
+  }
+
+  async function deleteMonth(monthId: string, moveToMonthId?: string) {
+    if (!confirm('Delete this month?')) return;
+    const res = await fetch(`/api/months/${monthId}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moveToMonthId }) });
+    const d = await res.json();
+    if (d.ok) {
+      const mres = await fetch('/api/months').then(r=>r.json());
+      setMonths(mres.months || []);
+      if (selectedMonth === monthId) setSelectedMonth(mres.months?.[0]?.id ?? null);
+      await refreshExpenses();
+    } else {
+      alert(d.error || 'Delete failed');
+    }
   }
 
   const totalBudget = budgets.reduce((s, b) => s + (b.amount || 0), 0);
@@ -143,6 +203,8 @@ export default function Home() {
           </select>
           <button className="bg-emerald-600 px-4 py-2 rounded" onClick={()=>setShowAdd(true)}>+ Add Record</button>
           <button className="bg-sky-600 px-4 py-2 rounded" onClick={openBudgetEditor}>Budgets</button>
+          <button className="bg-gray-700 px-4 py-2 rounded" onClick={()=>setShowMonths(true)}>Months</button>
+          <a href="/categories" className="bg-indigo-600 px-4 py-2 rounded">Categories</a>
         </div>
       </header>
 
@@ -163,7 +225,7 @@ export default function Home() {
           ) : (
             <table className="w-full text-left">
               <thead className="text-gray-400 text-sm">
-                <tr><th>Date</th><th>Note</th><th className="text-right">Amount</th></tr>
+                <tr><th>Date</th><th>Note</th><th className="text-right">Amount</th><th></th></tr>
               </thead>
               <tbody>
                 {expenses.map((e) => (
@@ -171,6 +233,10 @@ export default function Home() {
                     <td className="py-2">{e.date}</td>
                     <td>{e.note}</td>
                     <td className="text-right">${e.amount.toFixed(2)}</td>
+                    <td className="text-right pr-4">
+                      <button className="text-sm text-sky-400 mr-2" onClick={()=>setEditingExpense(e)}>Edit</button>
+                      <button className="text-sm text-red-400" onClick={()=>deleteExpense(e.id)}>Delete</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -228,6 +294,37 @@ export default function Home() {
         </div>
       )}
 
+      {/* Edit Expense Modal */}
+      {editingExpense && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-[#081224] rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Edit Expense</h3>
+            <form onSubmit={(e)=>{e.preventDefault(); saveEditedExpense(editingExpense);}} className="space-y-3">
+              <div>
+                <label className="block text-sm mb-1">Category</label>
+                <CategorySelector value={editingExpense.categoryId} onChange={(id)=>setEditingExpense({...editingExpense, categoryId: id})} />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Amount</label>
+                <input className="w-full bg-[#0b1220] px-3 py-2 rounded" value={String(editingExpense.amount)} onChange={(e)=>setEditingExpense({...editingExpense, amount: Number(e.target.value)})} />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Date</label>
+                <input type="date" className="w-full bg-[#0b1220] px-3 py-2 rounded" value={editingExpense.date} onChange={(e)=>setEditingExpense({...editingExpense, date: e.target.value})} />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Note</label>
+                <input className="w-full bg-[#0b1220] px-3 py-2 rounded" value={editingExpense.note||''} onChange={(e)=>setEditingExpense({...editingExpense, note: e.target.value})} />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" className="px-4 py-2 rounded bg-gray-600" onClick={()=>setEditingExpense(null)}>Cancel</button>
+                <button type="submit" className="px-4 py-2 rounded bg-emerald-600">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Budget Editor Modal */}
       {showBudget && (
         <BudgetEditor
@@ -237,19 +334,21 @@ export default function Home() {
           onSave={saveBudgets}
         />
       )}
+
+      {/* Months Manager Modal */}
+      {showMonths && (
+        <MonthsManager months={months} onClose={()=>setShowMonths(false)} onCreate={createMonth} onDelete={deleteMonth} />
+      )}
     </div>
   );
 }
 
 function BudgetEditor({ budgets, categoriesMap, onClose, onSave }: { budgets: Budget[]; categoriesMap: Record<string, { name: string; color: string }>; onClose: () => void; onSave: (edited: { categoryId: string; amount: number; id?: string }[]) => void; }) {
-  const [edited, setEdited] = useState(() => {
-    // start from existing budgets
-    return budgets.map((b) => ({ categoryId: b.categoryId, amount: b.amount || 0, id: b.id }));
-  });
+  const [edited, setEdited] = useState(() => budgets.map((b) => ({ categoryId: b.categoryId, amount: b.amount || 0, id: b.id })));
 
-  useEffect(() => {
+  useEffect(()=>{
     setEdited(budgets.map((b) => ({ categoryId: b.categoryId, amount: b.amount || 0, id: b.id })));
-  }, [budgets]);
+  },[budgets])
 
   function setAmountFor(categoryId: string, amount: number) {
     setEdited((e) => {
@@ -261,7 +360,6 @@ function BudgetEditor({ budgets, categoriesMap, onClose, onSave }: { budgets: Bu
     });
   }
 
-  // show categories list - uses categoriesMap keys
   const categoryIds = Object.keys(categoriesMap);
 
   return (
@@ -288,6 +386,47 @@ function BudgetEditor({ budgets, categoriesMap, onClose, onSave }: { budgets: Bu
         <div className="flex justify-end gap-2">
           <button className="px-4 py-2 rounded bg-gray-600" onClick={onClose}>Cancel</button>
           <button className="px-4 py-2 rounded bg-emerald-600" onClick={()=>onSave(edited)}>Save</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MonthsManager({ months, onClose, onCreate, onDelete }: { months: Month[]; onClose: ()=>void; onCreate: (y:number,m:number,n?:string)=>void; onDelete: (id:string, moveTo?:string)=>void; }){
+  const [y,setY] = useState(new Date().getFullYear());
+  const [m,setM] = useState(new Date().getMonth()+1);
+  const [name,setName] = useState('');
+  const [selectedMoveTo,setSelectedMoveTo] = useState<string | null>(null);
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+      <div className="bg-[#081224] rounded-lg p-6 w-full max-w-3xl">
+        <h3 className="text-lg font-semibold mb-4">Manage Months</h3>
+        <div className="grid gap-4 mb-4">
+          <div className="flex gap-2">
+            <input type="number" value={y} onChange={(e)=>setY(Number(e.target.value))} className="bg-[#0b1220] p-2 rounded w-32" />
+            <input type="number" value={m} onChange={(e)=>setM(Number(e.target.value))} className="bg-[#0b1220] p-2 rounded w-20" />
+            <input value={name} onChange={(e)=>setName(e.target.value)} placeholder="Name (optional)" className="bg-[#0b1220] p-2 rounded flex-1" />
+            <button className="bg-emerald-600 px-3 rounded" onClick={()=>{onCreate(y,m,name); setName('');}}>Create</button>
+          </div>
+
+          <div className="max-h-60 overflow-y-auto">
+            {months.map((mo)=> (
+              <div key={mo.id} className="flex items-center justify-between bg-[#0b1220] p-3 rounded mb-2">
+                <div>{mo.name || `${mo.month}/${mo.year}`}</div>
+                <div className="flex gap-2">
+                  <select className="bg-[#081224] p-1 rounded" onChange={(e)=>setSelectedMoveTo(e.target.value)} defaultValue="">
+                    <option value="">Move to...</option>
+                    {months.filter(x=>x.id!==mo.id).map(x=> <option key={x.id} value={x.id}>{x.name}</option>)}
+                  </select>
+                  <button className="bg-red-600 px-3 rounded" onClick={()=>onDelete(mo.id, selectedMoveTo || undefined)}>Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button className="px-4 py-2 rounded bg-gray-600" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>
