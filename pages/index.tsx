@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import StatCard from "../components/StatCard";
+import CategorySelector from "../components/CategorySelector";
+import DonutChart from "../components/DonutChart";
+import LineChart from "../components/LineChart";
 
 type Month = { id: string; year: number; month: number; name: string; createdAt: string };
 type Expense = { id: string; monthId: string; categoryId: string; amount: number; date: string; note?: string };
@@ -9,6 +12,13 @@ export default function Home() {
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+
+  // form
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState("");
+  const [note, setNote] = useState("");
+  const [categoryId, setCategoryId] = useState("");
 
   useEffect(() => {
     fetch("/api/months")
@@ -28,15 +38,69 @@ export default function Home() {
       .finally(() => setLoading(false));
   }, [selectedMonth]);
 
+  async function submitExpense(e: any) {
+    e.preventDefault();
+    if (!selectedMonth) return alert("Select month");
+    if (!categoryId) return alert("Select category");
+    if (!amount || Number(amount) <= 0) return alert("Enter amount");
+    if (!date) return alert("Enter date");
+    const res = await fetch(`/api/months/${selectedMonth}/expenses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ categoryId, amount: Number(amount), date, note }),
+    });
+    const d = await res.json();
+    if (d.ok) {
+      // refresh
+      fetch(`/api/months/${selectedMonth}/expenses`).then((r) => r.json()).then((d) => setExpenses(d.expenses || []));
+      setShowAdd(false);
+      setAmount("");
+      setDate("");
+      setNote("");
+      setCategoryId("");
+    } else {
+      alert(d.error || "Failed to add expense");
+    }
+  }
+
   const totalBudget = 1700; // placeholder until budgets endpoint implemented
   const totalExpenses = expenses.reduce((s, e) => s + (e.amount || 0), 0);
   const remaining = totalBudget - totalExpenses;
+
+  // prepare donut data
+  const [categoriesMap, setCategoriesMap] = useState<Record<string, { name: string; color: string }>>({});
+  useEffect(() => {
+    fetch('/api/categories').then(r=>r.json()).then(d=>{
+      const map: any = {};
+      (d.categories||[]).forEach((c: any)=>map[c.id] = { name: c.name, color: c.color });
+      setCategoriesMap(map);
+    })
+  },[])
+
+  const categorySums: Record<string, number> = {};
+  expenses.forEach((e) => {
+    if (!categorySums[e.categoryId]) categorySums[e.categoryId] = 0;
+    categorySums[e.categoryId] += e.amount || 0;
+  });
+  const donutLabels = Object.keys(categorySums).map((id) => categoriesMap[id]?.name || id);
+  const donutValues = Object.keys(categorySums).map((id) => categorySums[id]);
+  const donutColors = Object.keys(categorySums).map((id) => categoriesMap[id]?.color || '#60a5fa');
+
+  // daily trend: group by day of month
+  const dayMap: Record<string, number> = {};
+  expenses.forEach((e)=>{
+    const d = e.date;
+    dayMap[d] = (dayMap[d] || 0) + e.amount;
+  })
+  const sortedDays = Object.keys(dayMap).sort();
+  const dayLabels = sortedDays;
+  const dayValues = sortedDays.map(d=>dayMap[d]);
 
   return (
     <div className="min-h-screen p-8">
       <header className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Finance & Expense Tracker</h1>
-        <div>
+        <div className="flex items-center gap-4">
           <select className="bg-[#081224] px-3 py-2 rounded" value={selectedMonth ?? ""} onChange={(e) => setSelectedMonth(e.target.value)}>
             {months.map((m) => (
               <option key={m.id} value={m.id}>
@@ -44,6 +108,7 @@ export default function Home() {
               </option>
             ))}
           </select>
+          <button className="bg-emerald-600 px-4 py-2 rounded" onClick={()=>setShowAdd(true)}>+ Add Record</button>
         </div>
       </header>
 
@@ -80,10 +145,54 @@ export default function Home() {
         </div>
 
         <div className="card">
-          <h3 className="text-lg font-semibold mb-4">Charts (placeholder)</h3>
-          <div className="h-48 flex items-center justify-center text-gray-400">Donut / Budget vs Actual / Daily trend will be here</div>
+          <h3 className="text-lg font-semibold mb-4">Expenses by Category</h3>
+          {donutValues.length === 0 ? (
+            <div className="text-sm text-gray-400">No expenses logged for this month</div>
+          ) : (
+            <DonutChart data={{ labels: donutLabels, values: donutValues, colors: donutColors }} />
+          )}
         </div>
       </section>
+
+      <section className="mt-6 card">
+        <h3 className="text-lg font-semibold mb-4">Daily Expenses Trend</h3>
+        {dayValues.length === 0 ? (
+          <div className="text-sm text-gray-400">No daily outflow</div>
+        ) : (
+          <LineChart labels={dayLabels} values={dayValues} />
+        )}
+      </section>
+
+      {/* Add Expense Modal */}
+      {showAdd && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-[#081224] rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Add Expense</h3>
+            <form onSubmit={submitExpense} className="space-y-3">
+              <div>
+                <label className="block text-sm mb-1">Category</label>
+                <CategorySelector value={categoryId} onChange={(id)=>setCategoryId(id)} />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Amount</label>
+                <input className="w-full bg-[#0b1220] px-3 py-2 rounded" value={amount} onChange={(e)=>setAmount(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Date</label>
+                <input type="date" className="w-full bg-[#0b1220] px-3 py-2 rounded" value={date} onChange={(e)=>setDate(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Note</label>
+                <input className="w-full bg-[#0b1220] px-3 py-2 rounded" value={note} onChange={(e)=>setNote(e.target.value)} />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" className="px-4 py-2 rounded bg-gray-600" onClick={()=>setShowAdd(false)}>Cancel</button>
+                <button type="submit" className="px-4 py-2 rounded bg-emerald-600">Add</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
