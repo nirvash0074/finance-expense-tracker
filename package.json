@@ -5,12 +5,14 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
+    "postbuild": "npx @cloudflare/next-on-pages --output-dir=.cloudflare_pages",
     "start": "next start -p 3000",
     "lint": "next lint"
   },
   "dependencies": {
     "chart.js": "^4.4.0",
     "googleapis": "^121.0.0",
+    "jose": "^5.11.0",
     "next": "14.3.0",
     "react": "18.2.0",
     "react-chartjs-2": "^5.2.0",
@@ -20,6 +22,7 @@
   "devDependencies": {
     "@types/node": "20.4.2",
     "@types/react": "18.2.21",
+    "@cloudflare/next-on-pages": "^1.1.0",
     "autoprefixer": "^10.4.14",
     "postcss": "^8.4.24",
     "tailwindcss": "^4.2.1",

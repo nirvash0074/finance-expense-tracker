@@ -1,0 +1,11 @@
+name = "finance-expense-tracker"
+compatibility_date = "2026-10-14"
+# For Pages Functions we don't need account_id here; this is a helper config for wrangler if you use it locally.
+
+[build]
+command = "npm run build"
+
+[site]
+# Output directory produced by the postbuild step
+bucket = ".cloudflare_pages"
+entry-point = "."
