@@ -1,23 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { readRange, appendRow } from "../../lib/googleSheets";
+import { readRange, appendRow, updateRange, deleteRowByIndex } from "../../lib/googleSheets";
 import { v4 as uuidv4 } from "uuid";
 
-type CategoryRow = [string, string, string, string?]; // id,name,color,createdAt
-
-function rowsToCategories(rows: CategoryRow[]) {
-  return rows.map((r) => ({
-    id: r[0],
-    name: r[1],
-    color: r[2] || "#60a5fa",
-    createdAt: r[3],
-  }));
-}
+// GET /api/categories
+// POST /api/categories
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     if (req.method === "GET") {
       const rows = await readRange("Categories!A2:D");
-      const categories = rowsToCategories(rows as CategoryRow[]);
+      const categories = (rows || []).map((r: any[]) => ({ id: r[0], name: r[1], color: r[2] || "#60a5fa", createdAt: r[3] }));
       return res.status(200).json({ ok: true, categories });
     }
 
